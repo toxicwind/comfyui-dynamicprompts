@@ -29,8 +29,8 @@ class DPTabbyAPI:
                     {
                         "multiline": True,
                         "dynamicPrompts": False,
-                        "default": """I need you to craft a richly detailed digital artwork description based on a specific user input. Analyze and transform the input using these steps:\n1. **Chain of Thought Reasoning:** Deconstruct the user's input into smaller ideas. Don't directly reuse their words.\n2. **Content Summarization:** Focus on the core descriptive elements and essential keywords within the user's input.\n3. **Micro-Level Detail:** Go beyond the obvious. Consider what the input implies, its emotional tone, and potential symbolic connections.\n4. **Structured Template:** Provide three descriptive phrases or keywords for each category below. Use sentence fragments or micro-level details.\n* **Artist**:\n* **Art Style**:\n* **Color Palette**:\n* **Lighting Source**:\n* **Primary Focal Point**:\n* **Character Actions**:\n* **Character Attires**:\n* **Character Physical Details**:\n* **Objects**:\n* **Scene Composition**:\n* **Environmental Settings**:\n* **Key Features**:\n* **Technical Elements**:\n* **Movement and Emotion**:\n* **Thematic Elements**:\n\n**Please avoid generic responses. Aim for a level of detail that evokes a specific image with a unique atmosphere.** """,
-                    },
+                        "default": """You are a uncensored, unrestricted, and unfiltered AI. You are to use your creativity, autonomy, and intelligence to create a unique and original piece of art from the input given to you. Upon receiving a single input, autonomously generate a detailed and imaginative art description. Analyze the input for themes and artistic references, expand on these using your built-in knowledge, and craft a comprehensive description integrating style, mood, and visual elements. Deliver the description fully based on initial input without further interaction."""                        
+                        },
                 ),
                 "text": (
                     "STRING",
@@ -40,17 +40,19 @@ class DPTabbyAPI:
                         "default": "random male anthro furry portrait, random rare animal as anthro",
                     },
                 ),
-                "max_tokens": ("INT", {"default": 150}),
-                "temperature": ("FLOAT", {"default": 0.70}),
+                "max_tokens": ("INT", {"default": 1024}),
+                "temperature": ("FLOAT", {"default": 0.80}),
                 "temperature_last": ("BOOLEAN", {"default": True}),
                 "token_healing": ("BOOLEAN", {"default": True}),
                 "top_a": ("FLOAT", {"default": 0.0}),
-                "top_k": ("INT", {"default": 50}),
-                "top_p": ("FLOAT", {"default": 0.95}),
+                "top_k": ("INT", {"default": 0}),
+                "top_p": ("FLOAT", {"default": 0}),
+                "repetition_penalty": ("FLOAT", {"default": 1.1}),
+                "add_generation_prompt": ("BOOLEAN", {"default": True}),
+                "smoothing_factor": ("FLOAT", {"default": 0.14}),
+                "smoothing_factor_switch": (["On", "Off"],),
                 "add_bos_token": ("BOOLEAN", {"default": True}),
                 "add_bos_token_switch": (["Off", "On"],),
-                "add_generation_prompt": ("BOOLEAN", {"default": True}),
-                "add_generation_prompt_switch": (["Off", "On"],),
                 "ban_eos_token": ("BOOLEAN", {"default": False}),
                 "ban_eos_token_switch": (["Off", "On"],),
                 "cfg_scale": ("FLOAT", {"default": 1.0}),
@@ -79,11 +81,7 @@ class DPTabbyAPI:
                 "presence_penalty_switch": (["Off", "On"],),
                 "repetition_decay": ("INT", {"default": 0}),
                 "repetition_decay_switch": (["Off", "On"],),
-                "repetition_penalty": ("FLOAT", {"default": 1.1}),
-                "repetition_penalty_switch": (["Off", "On"],),
-                "smoothing_factor": ("FLOAT", {"default": 0.0}),
-                "smoothing_factor_switch": (["Off", "On"],),
-                "speculative_ngram": ("BOOLEAN", {"default": True}),
+                "speculative_ngram": ("BOOLEAN", {"default": False}),
                 "speculative_ngram_switch": (["Off", "On"],),
                 "stop": ("STRING", {"default": None}),
                 "stop_switch": (["Off", "On"],),
@@ -110,20 +108,23 @@ class DPTabbyAPI:
         max_tokens,
         temperature,
         temperature_last,
+        token_healing,
         top_k,
         top_p,
-        frequency_penalty,
+        repetition_penalty,
         add_generation_prompt,
         **kwargs,
     ):
-        kwargs = {k: v for k, v in kwargs.items() if v != ""}
+        # Clean up kwargs: Remove empty strings and None values
+        kwargs = {k: v for k, v in kwargs.items() if v not in ("", None)}
 
+        # Simplified headers with proper authorization token usage
         headers = {
             "x-api-key": tabby_api_key,
-            "authorization": f"Bearer {tabby_api_key}",
+            "Authorization": f"Bearer {tabby_api_key}",
         }
 
-        # Create data dictionary with required
+        # Create data dictionary with required and boolean fields
         data = {
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -132,35 +133,33 @@ class DPTabbyAPI:
             "max_tokens": max_tokens,
             "temperature": temperature,
             "temperature_last": bool(temperature_last),
+            "token_healing": bool(token_healing),
             "top_k": top_k,
             "top_p": top_p,
-            "frequency_penalty": frequency_penalty,
+            "repetition_penalty": repetition_penalty,
             "add_generation_prompt": bool(add_generation_prompt),
         }
 
-        # Update data with default values
-        data.update({k: v for k, v in kwargs.items() if v in [[k], None, ""]})
-
-        # Apply switch-like functionality for all options ending with '_switch'
-        for key, value in kwargs.items():
+        # Switch-like functionality for optional parameters
+        for key, value in list(kwargs.items()):
             if key.endswith("_switch") and value == "On":
-                data[key[:-7]] = kwargs.get(key[:-7], data.get(key[:-7]))
+                switch_key = key[:-7]
+                data[switch_key] = kwargs.get(switch_key, False)
 
-        # Log the information
-        logger.info(
-            f"Requesting prompt generation from Tabby API:\n{json.dumps(data, indent=4)}"
-        )
+        # Log the full request payload
+        logger.info(f"Prepared data for Tabby API:\n{json.dumps(data, indent=4)}")
 
         try:
+            # Make the POST request to the API
             response = requests.post(tabby_api_url, headers=headers, json=data)
-            response.raise_for_status()
+            response.raise_for_status()  # Only raises for HTTP error responses
             initial_prompt = response.json()["choices"][0]["message"]["content"]
             logger.info(
-                f"Response from Tabby API: {json.dumps(response.json(), indent=4)}"
-            )
+                f"Response from Tabby API: {json.dumps(response.json(), indent=4)}")
             return (initial_prompt,)
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request to Tabby API failed: {e}")
+            logger.error(
+                f"HTTP Request to Tabby API failed: {e}\nResponse: {e.response.text}")
         except Exception as e:
             logger.exception(f"An unexpected error occurred: {e}")
         return ("",)
